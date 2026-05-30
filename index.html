@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8">
+        <title>TEST</title>
+        <style>
+            *{margin:0;padding:0;box-sizing:border-box}
+            body{background:#111;height:100vh;overflow:hidden}
+            #canvas{display:block;width:100vw;height:100vh;border:0;background:rgb(0,0,0);}
+            
+        </style>
+    </head>
+    <body>
+        <canvas id="canvas"></canvas>
+        <script>
+
+
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+let W=window.innerWidth,H=window.innerHeight;
+const fov=600;
+const cam={
+    x:-250,y:50,z:-250,
+    yaw:Math.PI/2,pitch:0,roll:0,
+    speed:3,rotSpeed:0.003
+};
+let currentHoverFace=0;
+function getDistance(a,b){
+    const dx=a.x-b.x,dy=a.y-b.y,dz=a.z-b.z;
+    return Math.sqrt(dx*dx+dy*dy+dz*dz);
+}
+function isPointInPolygon(px,py,verts){
+    let inside=!1;
+    for(let i=0,j=verts.length-1;i<verts.length;j=i++){
+        const xi=verts[i].x,yi=verts[i].y;
+        const xj=verts[j].x,yj=verts[j].y;
+        if(((yi>py)!==(yj>py))&&(px<(xj-xi)*(py-yi)/(yj-yi)+xi))
+            inside=!inside;
+    }
+    return inside;
+}
+function isPointIn3DPolygon(point,polygonPoints,normal) {
+    const u=[],v=[];
+    const p0=polygonPoints[0];
+    for(let i=1;i<polygonPoints.length;i++) {
+        u.push({x:polygonPoints[i].x-p0.x,y:polygonPoints[i].y-p0.y,z:polygonPoints[i].z-p0.z});
+    }
+    const w={x:point.x-p0.x,y:point.y-p0.y,z:point.z-p0.z};
+    let inside=false;
+    for(let i=0,j=polygonPoints.length-1;i<polygonPoints.length;j=i++) {
+        const vi=polygonPoints[i];
+        const vj=polygonPoints[j];
+        const cross={
+            x:(vj.x-vi.x)*(point.z-vi.z)-(vj.z-vi.z)*(point.x-vi.x),
+            y:(vj.z-vi.z)*(point.x-vi.x)-(vj.x-vi.x)*(point.z-vi.z),
+            z:(vj.x-vi.x)*(point.y-vi.y)-(vj.y-vi.y)*(point.x-vi.x)
+        };
+        const dot=cross.x*normal.x+cross.y*normal.y+cross.z*normal.z;
+        if(dot>0.001)inside=!inside;
+    }
+    return inside;
+}
+let foot=[{x:cam.x,y:cam.y,z:cam.z,yf:0},{x:cam.z,y:cam.y,z:cam.z,yf:0}],movingFoot=0;
+const sceneObjects=[
+    {
+        points:[{x:-300,y:0,z:-300},{x:300,y:0,z:-300},{x:300,y:0,z:300},{x:-300,y:0,z:300}],
+        color:"rgb(92, 78, 58)",normal:{x:0,y:0,z:0}},
+    {
+        points:[{x:-300,y:220,z:-300},{x:300,y:220,z:-300},{x:300,y:220,z:300},{x:-300,y:220,z:300}],
+        color:"rgb(200, 200, 200)",normal:{x:0,y:0,z:0}},
+    {
+        points:[{x:-300,y:0,z:-300},{x:300,y:0,z:-300},{x:300,y:220,z:-300},{x:-300,y:220,z:-300}],
+        color:"rgb(210, 205, 195)",normal:{x:0,y:0,z:0}},
+    {
+        points:[{x:-300,y:0,z:300},{x:300,y:0,z:300},{x:300,y:220,z:300},{x:-300,y:220,z:300}],
+        color:"rgb(210, 205, 195)",normal:{x:0,y:0,z:0}},
+    {
+        points:[{x:-300,y:0,z:-300},{x:-300,y:0,z:300},{x:-300,y:220,z:300},{x:-300,y:220,z:-300}],
+        color:"rgb(200, 195, 185)",normal:{x:0,y:0,z:0}},
+    {
+        points:[{x:300,y:0,z:-300},{x:300,y:0,z:300},{x:300,y:220,z:300},{x:300,y:220,z:-300}],
+        color:"rgb(200, 195, 185)",normal:{x:0,y:0,z:0}},
+    {
+        points:[{x:-300,y:0,z:-200},{x:200,y:0,z:-200},{x:200,y:220,z:-200},{x:-300,y:220,z:-200}],
+        color:"rgb(210, 205, 195)",normal:{x:0,y:0,z:0}},
+    {
+        points:[{x:-299,y:0,z:-280},{x:-299,y:0,z:-220},{x:-299,y:120,z:-220},{x:-299,y:120,z:-280}],
+        color:"rgb(163, 106, 0)",normal:{x:0,y:0,z:0}},
+    {
+        points:[{x:-100,y:0,z:-100},{x:-100,y:0,z:100},{x:100,y:120,z:100},{x:100,y:120,z:-100}],
+        color:"rgb(200, 200, 200)",normal:{x:0,y:0,z:0}}
+];
+function getWorldPolygons(){
+    return sceneObjects.map(obj=>({
+        po:obj.points.map(p=>({x:p.x,y:p.y,z:p.z})),
+        co:obj.color,
+        id:obj.id
+    }));
+}
+function lerpPoint(p1,p2,t){
+    return{
+        x:p1.x+(p2.x-p1.x)*t,
+        y:p1.y+(p2.y-p1.y)*t,
+        z:p1.z+(p2.z-p1.z)*t
+    };
+}
+function calcFaceNormal(poly){
+    const pts=poly.po;
+    if(pts.length<3){
+        poly.n={x:0,y:0,z:1};
+        return poly;
+    }
+    const p0=pts[0],p1=pts[1],p2=pts[2];
+    const v1={x:p1.x-p0.x,y:p1.y-p0.y,z:p1.z-p0.z};
+    const v2={x:p2.x-p0.x,y:p2.y-p0.y,z:p2.z-p0.z};
+    const nx=v1.y*v2.z-v1.z*v2.y;
+    const ny=v1.z*v2.x-v1.x*v2.z;
+    const nz=v1.x*v2.y-v1.y*v2.x;
+    const len=Math.hypot(nx,ny,nz)||1;
+    poly.n={x:nx/len,y:ny/len,z:nz/len};
+    sceneObjects[poly.id].normal=poly.n;
+    return poly;
+}
+function splitPolygon(oldPoly,cutter){
+    const n=cutter.n;
+    const p0=cutter.po[0];
+    const pts=oldPoly.po;
+    const upper=[],lower=[];
+    for(let i=0;i<pts.length;i++){
+        const curr=pts[i];
+        const next=pts[(i+1)%pts.length];
+        const dc=(curr.x-p0.x)*n.x+(curr.y-p0.y)*n.y+(curr.z-p0.z)*n.z;
+        const dn=(next.x-p0.x)*n.x+(next.y-p0.y)*n.y+(next.z-p0.z)*n.z;
+        if(dc>0.001)upper.push(curr);else
+        if(dc<-0.001)lower.push(curr);else upper.push(curr),lower.push(curr);
+        if((dc>0.001&&dn<-0.001)||(dc<-0.001&&dn>0.001)){
+            const t=(Math.abs(dc)+Math.abs(dn));
+            upper.push(lerpPoint(curr,next,Math.abs(dc+0.5)/t));
+            lower.push(lerpPoint(curr,next,Math.abs(dc-0.5)/t));
+        }
+    }
+    return[{po:upper,co:oldPoly.co,id:oldPoly.id},{po:lower,co:oldPoly.co,id:oldPoly.id}];
+}
+function addOneByOne(newPoly,existing){
+    const cutter=calcFaceNormal(newPoly);
+    const n=cutter.n;
+    const p0=cutter.po[0];
+    const camD=(cam.x-p0.x)*n.x+(cam.y-p0.y)*n.y+(cam.z-p0.z)*n.z;
+    const up=[],down=[];
+    for(const p of existing){
+        const temp=splitPolygon(p,cutter);
+        if(temp[0].po.length>=3)up.push(temp[0]);
+        if(temp[1].po.length>=3)down.push(temp[1]);
+    }
+    return camD>0?[...down,cutter,...up]:[...up,cutter,...down];
+}
+function build(){
+    const source=getWorldPolygons();
+    let scene=[];
+    for(const poly of source){
+        scene=addOneByOne(poly,scene);
+    }
+    return scene;
+}
+function rotate(x,y,z){
+    let px=x-cam.x,py=y-cam.y,pz=z-cam.z;
+    const cy=Math.cos(-cam.yaw),sy=Math.sin(-cam.yaw);
+    let rx=px*cy+pz*sy,rz=-px*sy+pz*cy;
+    const cp=Math.cos(-cam.pitch),sp=Math.sin(-cam.pitch);
+    let ry=-(py*cp-rz*sp);rz=py*sp+rz*cp;
+    const cr=Math.cos(cam.roll),sr=Math.sin(cam.roll);
+    const rxf=rx*cr-ry*sr,ryf=rx*sr+ry*cr;
+    return{x:rxf,y:ryf,z:rz};
+}
+function projectRotated(p){
+    if(p.z<=0)return null;
+    const s=fov/p.z;
+    return{x:W/2+p.x*s,y:H/2+p.y*s};
+}
+function clipPolygonAgainstPlane(pts,plane){
+    const out=[];
+    if(!pts||pts.length===0)return out;
+    for(let i=0;i<pts.length;i++){
+        const a=pts[i];
+        const b=pts[(i+1)%pts.length];
+        const fa=plane.a*a.x+plane.b*a.y+plane.c*a.z+plane.d;
+        const fb=plane.a*b.x+plane.b*b.y+plane.c*b.z+plane.d;
+        const aIn=fa>=0;
+        const bIn=fb>=0;
+        if(aIn)out.push(a);
+        if(aIn!==bIn){
+            const t=fa/(fa-fb);
+            const ix=a.x+(b.x-a.x)*t;
+            const iy=a.y+(b.y-a.y)*t;
+            const iz=a.z+(b.z-a.z)*t;
+            out.push({x:ix,y:iy,z:iz});
+        }
+    }
+    return out;
+}
+function clipAgainstFrustum(pts,planes){
+    let res=pts.slice();
+    for(const pl of planes){
+        res=clipPolygonAgainstPlane(res,pl);
+        if(res.length===0)break;
+    }
+    return res;
+}
+function buildFrustumPlanes(viewW,viewH,fovVal,near=0.001,far=10000){
+    const hw=viewW/2;
+    const hh=viewH/2;
+    return[
+        {a:fovVal,b:0,c:hw,d:0},
+        {a:-fovVal,b:0,c:hw,d:0},
+        {a:0,b:fovVal,c:hh,d:0},
+        {a:0,b:-fovVal,c:hh,d:0},
+        {a:0,b:0,c:1,d:-near},
+        {a:0,b:0,c:-1,d:far}];
+}
+function resizeCanvas(){
+    const w=window.innerWidth,h=window.innerHeight;
+    const dpr=window.devicePixelRatio||1;
+    canvas.style.width=w+'px';
+    canvas.style.height=h+'px';
+    canvas.width=Math.max(1,Math.floor(w*dpr));
+    canvas.height=Math.max(1,Math.floor(h*dpr));
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    W=w;H=h;
+}
+const keys={w:0,a:0,s:0,d:0,e:0};
+let lock=false;
+function update(){
+    const fx=Math.sin(cam.yaw),fz=Math.cos(cam.yaw);
+    const rx=Math.cos(cam.yaw),rz=-Math.sin(cam.yaw);
+    let Move={x:0,y:0,z:0};
+    if(keys.w){Move.x+=fx;Move.z+=fz;}
+    if(keys.s){Move.x-=fx;Move.z-=fz;}
+    if(keys.a){Move.x-=rx;Move.z-=rz;}
+    if(keys.d){Move.x+=rx;Move.z+=rz;}
+    const temp1=getDistance({x:0,y:0,z:0},Move);
+    if(temp1>0.01){
+        foot[movingFoot].x+=Move.x/temp1*cam.speed;
+        foot[movingFoot].y+=Move.y/temp1*cam.speed;
+        foot[movingFoot].z+=Move.z/temp1*cam.speed;
+        cam.roll-=( Move.x*rx+Move.z*rz )/100;
+    }
+    const temp=getDistance(foot[0],foot[1]);
+    if(temp>40)movingFoot=1-movingFoot;
+    if(temp>70)window.location.href='dead.html';
+    cam.x=(foot[0].x+foot[1].x)/2;
+    cam.y-=(cam.y - ((foot[0].y+foot[1].y)/2+Math.sqrt(1-temp*temp/40/40/4)*40+10) )/5;
+    cam.z=(foot[0].z+foot[1].z)/2;
+    if(temp1<0.01){
+        foot[0].x-=(foot[0].x-foot[1].x)/10;
+        foot[0].z-=(foot[0].z-foot[1].z)/10;
+        foot[1].x-=(foot[1].x-foot[0].x)/10;
+        foot[1].z-=(foot[1].z-foot[0].z)/10;
+    }
+    cam.roll-=(cam.roll)/20;
+    for(const f of foot){
+        f.y+=f.yf;
+        for(const p of sceneObjects){
+            let t=(f.x-p.points[0].x)*p.normal.x+
+                    (f.y-p.points[0].y)*p.normal.y+
+                    (f.z-p.points[0].z)*p.normal.z;
+            if(Math.abs(t)<10){
+                const T={x:f.x-p.normal.x*t,y:f.y-p.normal.y*t,z:f.z-p.normal.z*t};
+                let inside=1;
+                for(let j=p.points.length-1,i=0;i<p.points.length;j=i++){
+                    const I=p.points[i],J=p.points[j];
+                    const cross={
+                        x:(J.x-I.x)*(T.z-I.z)-(J.z-I.z)*(T.x-I.x),
+                        y:(J.z-I.z)*(T.x-I.x)-(J.x-I.x)*(T.z-I.z),
+                        z:(J.x-I.x)*(T.y-I.y)-(J.y-I.y)*(T.x-I.x)};
+                    const dot=cross.x*p.normal.x+cross.y*p.normal.y+cross.z*p.normal.z;
+                    if(dot>0.001)inside=!inside;
+                }
+                if(inside){
+                    if(t>0)[f.x,f.y,f.z]=[f.x+p.normal.x*(10-t),f.y+p.normal.y*(10-t),f.z+p.normal.z*(10-t)];
+                    else   [f.x,f.y,f.z]=[f.x-p.normal.x*(10+t),f.y-p.normal.y*(10+t),f.z-p.normal.z*(10+t)];
+                    f.yf=0;
+                }
+            }
+        }
+        f.yf-=0.1;
+    }
+}
+let lastTime=0;
+function draw(polygons){
+    ctx.fillStyle="#000";
+    ctx.fillRect(0,0,W,H);
+    ctx.save();
+    ctx.imageSmoothingEnabled=false;
+    const near=1,far=1000;
+    const frustumPlanes=buildFrustumPlanes(W,H,fov,near,far);
+    const centerX=W/2;
+    const centerY=H/2;
+    currentHoverFace=-1;
+    for(const f of polygons){
+        const rotated=f.po.map(v=>rotate(v.x,v.y,v.z));
+        const clipped=clipAgainstFrustum(rotated,frustumPlanes);
+        if(clipped.length<3)continue;
+        const pts=[];
+        for(const v of clipped){
+            const s=projectRotated(v);
+            if(!s)continue;
+            pts.push(s);
+        }
+        if(pts.length<3)continue;
+        if(isPointInPolygon(centerX,centerY,pts))currentHoverFace=f.id;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x,pts[0].y);
+        for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x,pts[i].y);
+        ctx.closePath();
+        ctx.fillStyle=f.co;
+        ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.arc(centerX,centerY,2,0,Math.PI*2);
+    ctx.fillStyle='#fff';
+    ctx.fill();
+    const now=performance.now();
+    const fps=(1000/(now-lastTime)).toFixed(1);
+    lastTime=now;
+    ctx.fillStyle="#fff";
+    ctx.font="14px sans-serif";
+    ctx.fillText(`FPS:${fps}`,10,60);
+    ctx.fillText(`Faces:${polygons.length}`,10,80);
+    ctx.fillText(`BaseFaces:${sceneObjects.length}`,10,100);
+    ctx.fillText(`HoverFace:${currentHoverFace}`,10,120);
+    ctx.fillText(`x:${Math.round(cam.x*10)/10},`,10,140);
+    ctx.fillText(`y:${Math.round(cam.y*10)/10},`,70,140);
+    ctx.fillText(`z:${Math.round(cam.z*10)/10},`,130,140);
+    ctx.fillText(`yf:${Math.round(foot[0].yf*10)/10} `,190,140);
+    ctx.restore();
+}
+function loop(){
+    update();
+    const polygons=build();
+    draw(polygons);
+    requestAnimationFrame(loop);
+}
+document.addEventListener('keydown',e=>{if(keys[e.key]!==undefined)keys[e.key]=true});
+document.addEventListener('keyup',e=>{if(keys[e.key]!==undefined)keys[e.key]=false});
+canvas.addEventListener('click',()=>canvas.requestPointerLock());
+document.addEventListener('pointerlockchange',()=>lock=document.pointerLockElement===canvas);
+document.addEventListener('mousemove',e=>{
+    if(!lock)return;
+    cam.yaw+=e.movementX*cam.rotSpeed;
+    cam.pitch+=e.movementY*cam.rotSpeed;
+    cam.pitch=Math.max(-Math.PI/2+0.1,Math.min(Math.PI/2-0.1,cam.pitch));
+    cam.roll-=e.movementX*cam.rotSpeed/3;
+});
+window.addEventListener('resize',resizeCanvas);
+resizeCanvas();
+function Init(){
+    let i=0;
+    for(const f of sceneObjects){
+        f.id=i;
+        i++;
+    }
+    loop();
+}
+Init();
+
+
+</script>
+</body>
+</html>
