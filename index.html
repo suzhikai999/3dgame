@@ -246,7 +246,7 @@ function update(){
     }
     const temp=getDistance(foot[0],foot[1]);
     if(temp>40)movingFoot=1-movingFoot;
-    if(temp>70)window.location.href='dead.html';
+    if(temp>70)foot[1-movingFoot]=foot[movingFoot];
     cam.x=(foot[0].x+foot[1].x)/2;
     cam.y-=(cam.y - ((foot[0].y+foot[1].y)/2+Math.sqrt(1-temp*temp/40/40/4)*40+10) )/5;
     cam.z=(foot[0].z+foot[1].z)/2;
@@ -256,7 +256,7 @@ function update(){
         foot[1].x-=(foot[1].x-foot[0].x)/10;
         foot[1].z-=(foot[1].z-foot[0].z)/10;
     }
-    cam.roll-=(cam.roll)/20;
+    cam.roll-=(cam.roll)/20+(foot[0].yf+foot[1].yf+0.2)/100;cam.pitch+=(foot[0].yf+foot[1].yf+0.2)/100;
     for(const f of foot){
         f.y+=f.yf;
         for(const p of sceneObjects){
