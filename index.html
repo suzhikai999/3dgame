@@ -208,6 +208,20 @@ function update(){
     if(keys.d){Move.x+=rx;Move.z+=rz;}
     if(keys.r&&nl>0)cam.speed=6,nl-=0.7;else cam.speed=3,nl+=(nl<20)?-0.3:0.3,nl=Math.min(nl,100);
     if(nl<-100)nl=100;
+    if(currentHoverFace==0){
+        sceneObjects[0].color="rgb(150,0,0)";
+        if(keys.e)document.documentElement.innerHTML=`
+<!DOCTYPE html>
+<html lang="zh-CH">
+<head>
+    <meta charset="UTF-8">
+    <title>Game Over</title>
+</head>
+<${`body`}>
+    <p>你成功了，但可惜目前并没有制作下一层。</p>
+</${`body`}>
+</html>`;
+    }else sceneObjects[0].color="rgb(200,0,0)";
     const temp1=getDistance({x:0,y:0,z:0},Move);
     if(temp1>0.01&&Math.abs(foot[0].yf+foot[1].yf)<1){
         foot[movingFoot].x+=Move.x/temp1*cam.speed;
@@ -361,6 +375,31 @@ function Init(){
             });
         }
     }
+    const X=Math.random()*2900-1450,Z=Math.random()*2900-1450;
+    sceneObjects.unshift({
+        points:[{x:X,y:30,z:Z},{x:X+30,y:30,z:Z},{x:X+30,y:30,z:Z+30},{x:X,y:30,z:Z+30}],
+        color:"rgb(100,100,100)",normal:{x:0,y:0,z:0},id:0
+    });
+    sceneObjects.unshift({
+        points:[{x:X,y:0,z:Z},{x:X,y:0,z:Z+30},{x:X,y:30,z:Z+30},{x:X,y:30,z:Z}],
+        color:"rgb(105,105,105)",normal:{x:0,y:0,z:0},id:0
+    });
+    sceneObjects.unshift({
+        points:[{x:X+30,y:0,z:Z},{x:X+30,y:0,z:Z+30},{x:X+30,y:30,z:Z+30},{x:X+30,y:30,z:Z}],
+        color:"rgb(105,105,105)",normal:{x:0,y:0,z:0},id:0
+    });
+    sceneObjects.unshift({
+        points:[{x:X,y:0,z:Z},{x:X+30,y:0,z:Z},{x:X+30,y:30,z:Z},{x:X,y:30,z:Z}],
+        color:"rgb(110,110,110)",normal:{x:0,y:0,z:0},id:0
+    });
+    sceneObjects.unshift({
+        points:[{x:X,y:0,z:Z+30},{x:X+30,y:0,z:Z+30},{x:X+30,y:30,z:Z+30},{x:X,y:30,z:Z+30}],
+        color:"rgb(110,110,110)",normal:{x:0,y:0,z:0},id:0
+    });
+    sceneObjects.unshift({
+        points:[{x:X+5,y:32,z:Z+5},{x:X+25,y:32,z:Z+5},{x:X+25,y:32,z:Z+25},{x:X+5,y:32,z:Z+25}],
+        color:"rgb(200,0,0)",normal:{x:0,y:0,z:0},id:0
+    });
     loop();
 }
 Init();
