@@ -338,24 +338,24 @@ function draw(polygons){
         ctx.fillStyle=f.co;
         ctx.fill();
     }
-                ctx.save();
-                for (let i = 0; i < 2; i++) {
-                    const f = foot[i];
-                    const r = rotate(f.x, f.y, f.z);
-                    const scr = projectRotated(r);
-                    if (scr) {
-                        ctx.beginPath();
-                        ctx.arc(scr.x, scr.y, 6, 0, Math.PI * 2);
-                        ctx.fillStyle = i === movingFoot 
-                        ?'#004' 
-                        :'#400';
-                        ctx.fill();
-                        ctx.strokeStyle = '#fff';
-                        ctx.lineWidth = 1;
-                        ctx.stroke();
-                    }
-                }
-                ctx.restore();
+                // ctx.save();
+                // for (let i = 0; i < 2; i++) {
+                //     const f = foot[i];
+                //     const r = rotate(f.x, f.y, f.z);
+                //     const scr = projectRotated(r);
+                //     if (scr) {
+                //         ctx.beginPath();
+                //         ctx.arc(scr.x, scr.y, 6, 0, Math.PI * 2);
+                //         ctx.fillStyle = i === movingFoot 
+                //         ?'#004' 
+                //         :'#400';
+                //         ctx.fill();
+                //         ctx.strokeStyle = '#fff';
+                //         ctx.lineWidth = 1;
+                //         ctx.stroke();
+                //     }
+                // }
+                // ctx.restore();
     ctx.beginPath();
     ctx.arc(centerX,centerY,2,0,Math.PI*2);
     ctx.fillStyle='#fff';
