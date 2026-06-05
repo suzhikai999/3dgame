@@ -38,7 +38,7 @@ function isPointInPolygon(px,py,verts){
     }
     return inside;
 }
-let foot=[{x:cam.x,y:cam.y,z:cam.z,yf:0},{x:cam.x,y:cam.y,z:cam.z,yf:0}],movingFoot=0;
+let foot=[{x:cam.x,y:cam.y,z:cam.z,xf:0,yf:0,zf:0},{x:cam.x,y:cam.y,z:cam.z,xf:0,yf:0,zf:0}],movingFoot=0;
 const sceneObjects=[
     {
         points:[{x:-1500,y:0,z:-1500},{x:1500,y:0,z:-1500},{x:1500,y:220,z:-1500},{x:-1500,y:220,z:-1500}],
@@ -222,34 +222,16 @@ function update(){
 </${`body`}>
 </html>`;
     }else sceneObjects[0].color="rgb(200,0,0)";
-    const temp1=getDistance({x:0,y:0,z:0},Move);
-    if(temp1>0.01&&Math.abs(foot[0].yf+foot[1].yf)<1){
-        foot[movingFoot].x+=Move.x/temp1*cam.speed;
-        foot[movingFoot].y+=Move.y/temp1*cam.speed;
-        foot[movingFoot].z+=Move.z/temp1*cam.speed;
-        cam.roll-=( Move.x*rx+Move.z*rz )/100;
-    }
-    const temp=getDistance(foot[0],foot[1]);
-    if(temp>30+cam.speed*5)movingFoot=1-movingFoot;
-    if(temp>70)foot[0].x=foot[1].x=cam.x,
-               foot[0].y=foot[1].y=((foot[0].y+foot[1].y)/2+Math.sqrt(1-temp*temp/40/40/4)*40+10),
-               foot[0].z=foot[1].z=cam.z;
-    cam.x=(foot[0].x+foot[1].x)/2;
-    cam.y-=(cam.y - ((foot[0].y+foot[1].y)/2+Math.sqrt(1-temp*temp/40/40/4)*40+10) )/3;
-    cam.z=(foot[0].z+foot[1].z)/2;
-    if(temp1<0.01){
-        foot[0].x-=(foot[0].x-foot[1].x)/10;
-        foot[0].z-=(foot[0].z-foot[1].z)/10;
-        foot[1].x-=(foot[1].x-foot[0].x)/10;
-        foot[1].z-=(foot[1].z-foot[0].z)/10;
-    }
-    if(foot[0].yf+foot[1].yf<-1)cam.roll+=cam.roll/50;else cam.roll-=(cam.roll)/20;
-    for(const f of foot){
+    let onground=[0,0];
+    for(const i of [0,1]){
+        const f=foot[i];
+        f.x+=f.xf;//f.xf*=0.9;
         f.y+=f.yf;
+        f.z+=f.zf;//f.zf*=0.9;
         for(const p of sceneObjects){
             let t=(f.x-p.points[0].x)*p.normal.x+
-                (f.y-p.points[0].y)*p.normal.y+
-                (f.z-p.points[0].z)*p.normal.z;
+                  (f.y-p.points[0].y)*p.normal.y+
+                  (f.z-p.points[0].z)*p.normal.z;
             if(Math.abs(t)<10){
                 let temp=[];
                 let ax,ay,az;
@@ -277,12 +259,54 @@ function update(){
                 if(inside){
                     if(t>0)[f.x,f.y,f.z]=[f.x+p.normal.x*(10-t),f.y+p.normal.y*(10-t),f.z+p.normal.z*(10-t)];
                     else   [f.x,f.y,f.z]=[f.x-p.normal.x*(10+t),f.y-p.normal.y*(10+t),f.z-p.normal.z*(10+t)];
-                    f.yf=0;
+                    if((p.normal.y>0)==(t>0)&&Math.abs(p.normal.y)>0.01){
+                        f.yf=0;
+                        f.xf=0;
+                        f.zf=0;
+                        onground[i]=1;
+                    }
                 }
             }
         }
-        f.yf-=0.1;
     }
+    for(const f of foot){
+        f.yf-=0.2*((onground[0]==0||onground[1]==0)?0.5:1);
+    }
+    const temp1=getDistance({x:0,y:0,z:0},Move);
+    if(temp1>0.01&&onground[movingFoot]){
+        const C=1.2;
+        const temx=Move.x/temp1*cam.speed*12*C,temz=Move.z/temp1*cam.speed*12*C;
+        foot[movingFoot].xf=(foot[1-movingFoot].x+temx-foot[movingFoot].x)/24/C;
+        foot[movingFoot].yf=C;
+        foot[movingFoot].zf=(foot[1-movingFoot].z+temz-foot[movingFoot].z)/24/C;
+    }
+    if(onground[0]&&onground[1]){
+        const temp=getDistance(foot[0],foot[1]);
+        if(temp>0.01){
+            const A=(foot[0].x-cam.x)*Move.x+
+                    (foot[0].y-cam.y)*Move.y+
+                    (foot[0].z-cam.z)*Move.z;
+            const B=(foot[1].x-cam.x)*Move.x+
+                    (foot[1].y-cam.y)*Move.y+
+                    (foot[1].z-cam.z)*Move.z;
+            if(A<B)movingFoot=0;
+            else movingFoot=1;
+        }
+        if(temp>70)foot[0].x=foot[1].x=cam.x,
+                foot[0].y=foot[1].y=cam.y-50,
+                foot[0].z=foot[1].z=cam.z;
+        if(temp1<0.01){
+            foot[0].x-=(foot[0].x-foot[1].x)/10;
+            foot[0].z-=(foot[0].z-foot[1].z)/10;
+            foot[1].x-=(foot[1].x-foot[0].x)/10;
+            foot[1].z-=(foot[1].z-foot[0].z)/10;
+        }
+    }
+    if(Math.abs(foot[0].yf+foot[1].yf)<3)cam.roll-=Math.sin((cam.roll)/20);else cam.roll+=cam.roll/50;
+    cam.roll-=( Move.x*rx+Move.z*rz )/100;
+    cam.x=(foot[0].x+foot[1].x)/2;
+    cam.y=(foot[0].y+foot[1].y)/2+50;
+    cam.z=(foot[0].z+foot[1].z)/2;
 }
 let lastTime=0;
 function draw(polygons){
@@ -314,6 +338,24 @@ function draw(polygons){
         ctx.fillStyle=f.co;
         ctx.fill();
     }
+                ctx.save();
+                for (let i = 0; i < 2; i++) {
+                    const f = foot[i];
+                    const r = rotate(f.x, f.y, f.z);
+                    const scr = projectRotated(r);
+                    if (scr) {
+                        ctx.beginPath();
+                        ctx.arc(scr.x, scr.y, 6, 0, Math.PI * 2);
+                        ctx.fillStyle = i === movingFoot 
+                        ?'#004' 
+                        :'#400';
+                        ctx.fill();
+                        ctx.strokeStyle = '#fff';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
+                }
+                ctx.restore();
     ctx.beginPath();
     ctx.arc(centerX,centerY,2,0,Math.PI*2);
     ctx.fillStyle='#fff';
