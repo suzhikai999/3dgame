@@ -5,18 +5,137 @@
         <title>TEST</title>
         <style>
             *{margin:0;padding:0;box-sizing:border-box}
-            body{background:#111;height:100vh;overflow:hidden}
+            body{background:#111;height:100vh}
             #canvas{display:block;width:100vw;height:100vh;border:0;background:rgb(224, 189, 49);}
             
         </style>
     </head>
     <body>
         <canvas id="canvas"></canvas>
+        <p style="position: absolute;left:10px;top:0;color:#fff;font-family: monospace;" id="info"></p>
+        <script>
+class MaxPerfPolyRenderer{
+    constructor(canvas){
+        this.canvas=canvas;
+        const gl=this.gl=canvas.getContext("webgl2",{antialias:false,preserveDrawingBuffer:false});
+        if(!gl)throw new Error("需要WebGL2");
+        this.W=canvas.width;
+        this.H=canvas.height;
+        const MAX_VERT=40000*18;
+        this.pool=new Float32Array(MAX_VERT*6);
+        this.writePtr=0;
+        this.vbo=gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER,this.vbo);
+        gl.bufferData(gl.ARRAY_BUFFER,this.pool.byteLength,gl.STREAM_DRAW);
+        const vs=`#version 300 es
+precision highp float;
+layout(location=0)in vec2 aPos;
+layout(location=1)in vec4 aColor;
+uniform vec2 uRes;
+out vec4 vColor;
+void main(){
+    vec2 ndc=(aPos/uRes)*2.0-1.0;
+    gl_Position=vec4(ndc.x,-ndc.y,0.0,1.0);
+    vColor=aColor;
+}`;
+        const fs=`#version 300 es
+precision highp float;
+in vec4 vColor;
+out vec4 fragColor;
+void main(){fragColor=vColor;}`;
+        this.prog=this._mkProg(vs,fs);
+        this.loc={
+            aPos:gl.getAttribLocation(this.prog,"aPos"),
+            aColor:gl.getAttribLocation(this.prog,"aColor"),
+            uRes:gl.getUniformLocation(this.prog,"uRes")
+        };
+        this.fb=gl.createFramebuffer();
+        this.tex=gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D,this.tex);
+        gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,this.W,this.H,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+        gl.bindFramebuffer(gl.FRAMEBUFFER,this.fb);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,this.tex,0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    }
+    _mkProg(vsrc,fsrc){
+        const gl=this.gl;
+        const vs=gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(vs,vsrc);gl.compileShader(vs);
+        const fs=gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(fs,fsrc);gl.compileShader(fs);
+        const p=gl.createProgram();
+        gl.attachShader(p,vs);gl.attachShader(p,fs);
+        gl.linkProgram(p);
+        return p;
+    }
+    bindOffscreen(){
+        const gl=this.gl;
+        gl.bindFramebuffer(gl.FRAMEBUFFER,this.fb);
+        gl.viewport(0,0,this.W,this.H);
+        gl.clearColor(0.1,0.1,0.12,1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        this.writePtr=0;
+    }
+    drawPolygon(pts,fill){
+        const p=this.pool;
+        const n=pts.length;
+        if(n<3)return;
+        const x0=pts[0].x,y0=pts[0].y;
+        const r=fill[0]/255,g=fill[1]/255,b=fill[2]/255,a=1;
+        for(let i=1;i<n-1;i++){
+            this._pushVertex(x0,y0,r,g,b,a);
+            this._pushVertex(pts[i].x,pts[i].y,r,g,b,a);
+            this._pushVertex(pts[i+1].x,pts[i+1].y,r,g,b,a);
+        }
+    }
+    _pushVertex(x,y,r,g,b,a){
+        const p=this.pool;
+        const w=this.writePtr;
+        p[w+0]=x;p[w+1]=y;
+        p[w+2]=r;p[w+3]=g;p[w+4]=b;p[w+5]=a;
+        this.writePtr+=6;
+    }
+    present(){
+        const gl=this.gl;
+        const vertCount=this.writePtr/6;
+        if(vertCount===0){
+            gl.bindFramebuffer(gl.READ_FRAMEBUFFER,this.fb);
+            gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,null);
+            gl.blitFramebuffer(0,0,this.W,this.H,0,0,this.W,this.H,gl.COLOR_BUFFER_BIT,gl.NEAREST);
+            return;
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER,this.vbo);
+        gl.bufferSubData(gl.ARRAY_BUFFER,0,this.pool.subarray(0,this.writePtr));
+        gl.useProgram(this.prog);
+        gl.uniform2f(this.loc.uRes,this.W,this.H);
+        const stride=6*4;
+        gl.enableVertexAttribArray(this.loc.aPos);
+        gl.vertexAttribPointer(this.loc.aPos,2,gl.FLOAT,false,stride,0);
+        gl.enableVertexAttribArray(this.loc.aColor);
+        gl.vertexAttribPointer(this.loc.aColor,4,gl.FLOAT,false,stride,2*4);
+        gl.drawArrays(gl.TRIANGLES,0,vertCount);
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER,this.fb);
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,null);
+        gl.blitFramebuffer(0,0,this.W,this.H,0,0,this.W,this.H,gl.COLOR_BUFFER_BIT,gl.NEAREST);
+        gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    }
+    resize(w,h){
+        const gl=this.gl;
+        this.W=w;
+        this.H=h;
+        gl.bindTexture(gl.TEXTURE_2D,this.tex);
+        gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+        gl.bindTexture(gl.TEXTURE_2D,null);
+    }
+}
+        </script>
         <script>
 
 
 const canvas=document.getElementById('canvas');
-const ctx=canvas.getContext('2d');
+const renderer=new MaxPerfPolyRenderer(canvas);
 let W=window.innerWidth,H=window.innerHeight;
 const fov=600;
 const cam={
@@ -42,22 +161,22 @@ let foot=[{x:cam.x,y:cam.y,z:cam.z,xf:0,yf:0,zf:0},{x:cam.x,y:cam.y,z:cam.z,xf:0
 const sceneObjects=[
     {
         points:[{x:-1500,y:0,z:-1500},{x:1500,y:0,z:-1500},{x:1500,y:220,z:-1500},{x:-1500,y:220,z:-1500}],
-        color:"rgb(216, 177, 21)",normal:{x:0,y:0,z:0}},
+        color:[216,177,21,1],normal:{x:0,y:0,z:0}},
     {
         points:[{x:-1500,y:0,z:1500},{x:1500,y:0,z:1500},{x:1500,y:220,z:1500},{x:-1500,y:220,z:1500}],
-        color:"rgb(216, 177, 21)",normal:{x:0,y:0,z:0}},
+        color:[216,177,21,1],normal:{x:0,y:0,z:0}},
     {
         points:[{x:-1500,y:0,z:-1500},{x:-1500,y:0,z:1500},{x:-1500,y:220,z:1500},{x:-1500,y:220,z:-1500}],
-        color:"rgb(170, 138, 10)",normal:{x:0,y:0,z:0}},
+        color:[170, 138, 10,1],normal:{x:0,y:0,z:0}},
     {
         points:[{x:1500,y:0,z:-1500},{x:1500,y:0,z:1500},{x:1500,y:220,z:1500},{x:1500,y:220,z:-1500}],
-        color:"rgb(170, 138, 10)",normal:{x:0,y:0,z:0}},
+        color:[170, 138, 10,1],normal:{x:0,y:0,z:0}},
     {
         points:[{x:-1500,y:0,z:-1500},{x:1500,y:0,z:-1500},{x:1500,y:0,z:1500},{x:-1500,y:0,z:1500}],
-        color:"rgb(113, 100, 47)",normal:{x:0,y:0,z:0}},
+        color:[113, 100, 47,1],normal:{x:0,y:0,z:0}},
     {
         points:[{x:-1500,y:220,z:-1500},{x:1500,y:220,z:-1500},{x:1500,y:220,z:1500},{x:-1500,y:220,z:1500}],
-        color:"rgb(200, 200, 200)",normal:{x:0,y:0,z:0}}
+        color:[200, 200, 200,1],normal:{x:0,y:0,z:0}}
 ];
 function getWorldPolygons(){
     return sceneObjects.map(obj=>({
@@ -100,12 +219,13 @@ function splitPolygon(oldPoly,cutter){
         const next=pts[(i+1)%pts.length];
         const dc=(curr.x-p0.x)*n.x+(curr.y-p0.y)*n.y+(curr.z-p0.z)*n.z;
         const dn=(next.x-p0.x)*n.x+(next.y-p0.y)*n.y+(next.z-p0.z)*n.z;
-        if(dc>0.001)upper.push(curr);else
-        if(dc<-0.001)lower.push(curr);else upper.push(curr),lower.push(curr);
-        if((dc>0.001&&dn<-0.001)||(dc<-0.001&&dn>0.001)){
+        if(dc>0.0001)upper.push(curr);else
+        if(dc<-0.0001)lower.push(curr);else{upper.push(curr);lower.push(curr);}
+        if((dc>0.0001&&dn<-0.0001)||(dc<-0.0001&&dn>0.0001)){
             const t=(Math.abs(dc)+Math.abs(dn));
             upper.push(lerpPoint(curr,next,Math.abs(dc+0.5)/t));
             lower.push(lerpPoint(curr,next,Math.abs(dc-0.5)/t));
+            console.log(oldPoly.id);
         }
     }
     return[{po:upper,co:oldPoly.co,id:oldPoly.id},{po:lower,co:oldPoly.co,id:oldPoly.id}];
@@ -191,10 +311,12 @@ function resizeCanvas(){
     const dpr=window.devicePixelRatio||1;
     canvas.style.width=w+'px';
     canvas.style.height=h+'px';
-    canvas.width=Math.max(1,Math.floor(w*dpr));
-    canvas.height=Math.max(1,Math.floor(h*dpr));
-    ctx.setTransform(dpr,0,0,dpr,0,0);
-    W=w;H=h;
+    canvas.width=Math.max(1,Math.floor(w));
+    canvas.height=Math.max(1,Math.floor(h));
+    canvas.style.width=canvas.width+'px';
+    canvas.style.height=canvas.height+'px';
+    W=canvas.width;H=canvas.height;
+    renderer.resize(canvas.width,canvas.height);
 }
 const keys={w:0,a:0,s:0,d:0,e:0,r:0};
 let lock=false;
@@ -206,10 +328,10 @@ function update(){
     if(keys.s){Move.x-=fx;Move.z-=fz;}
     if(keys.a){Move.x-=rx;Move.z-=rz;}
     if(keys.d){Move.x+=rx;Move.z+=rz;}
-    if(keys.r&&nl>0)cam.speed=6,nl-=0.7;else cam.speed=3,nl+=(nl<20)?-0.3:0.3,nl=Math.min(nl,100);
+    if(keys.r&&nl>0)cam.speed=6,nl-=0.7;else cam.speed=30,nl+=(nl<20)?-0.3:0.3,nl=Math.min(nl,100);
     if(nl<-100)nl=100;
     if(currentHoverFace==0){
-        sceneObjects[0].color="rgb(150,0,0)";
+        sceneObjects[0].color=[150,0,0,1];
         if(keys.e)document.documentElement.innerHTML=`
 <!DOCTYPE html>
 <html lang="zh-CH">
@@ -221,7 +343,7 @@ function update(){
     <p>你成功了，但可惜目前并没有制作下一层。</p>
 </${`body`}>
 </html>`;
-    }else sceneObjects[0].color="rgb(200,0,0)";
+    }else sceneObjects[0].color=[200,0,0,1];
     let onground=[0,0];
     for(const i of [0,1]){
         const f=foot[i];
@@ -235,18 +357,15 @@ function update(){
             if(Math.abs(t)<10){
                 let temp=[];
                 let ax,ay,az;
-                if(Math.abs(p.normal.x) < 0.9){
+                if(Math.abs(p.normal.x)<0.9){
                     ax=1, ay=0, az=0;
-                }else{
-                    ax=0, ay=1, az=0;
-                }
+                }else{ax=0, ay=1, az=0;}
                 const ux = p.normal.y * az - p.normal.z * ay;
                 const uy = p.normal.z * ax - p.normal.x * az;
                 const uz = p.normal.x * ay - p.normal.y * ax;
                 const vx = uy * p.normal.z - uz * p.normal.y;
                 const vy = uz * p.normal.x - ux * p.normal.z;
                 const vz = ux * p.normal.y - uy * p.normal.x;
-
                 for(let i=0;i<p.points.length;i++){
                     const I=p.points[i];
                     temp.push({x:(I.x-p.points[0].x)*ux+(I.y-p.points[0].y)*uy+(I.z-p.points[0].z)*uz
@@ -254,8 +373,8 @@ function update(){
                     });
                 }
                 const inside=isPointInPolygon((f.x-p.points[0].x)*ux+(f.y-p.points[0].y)*uy+(f.z-p.points[0].z)*uz,
-                                            (f.x-p.points[0].x)*vx+(f.y-p.points[0].y)*vy+(f.z-p.points[0].z)*vz,
-                                            temp);
+                                              (f.x-p.points[0].x)*vx+(f.y-p.points[0].y)*vy+(f.z-p.points[0].z)*vz,
+                                              temp);
                 if(inside){
                     if(t>0)[f.x,f.y,f.z]=[f.x+p.normal.x*(10-t),f.y+p.normal.y*(10-t),f.z+p.normal.z*(10-t)];
                     else   [f.x,f.y,f.z]=[f.x-p.normal.x*(10+t),f.y-p.normal.y*(10+t),f.z-p.normal.z*(10+t)];
@@ -308,17 +427,16 @@ function update(){
     cam.y=(foot[0].y+foot[1].y)/2+50;
     cam.z=(foot[0].z+foot[1].z)/2;
 }
-let lastTime=0;
+let lastTime=0,choosing=76;
 function draw(polygons){
-    ctx.fillStyle="#000";
-    ctx.fillRect(0,0,W,H);
-    ctx.save();
-    ctx.imageSmoothingEnabled=false;
+    renderer.bindOffscreen();
     const near=1,far=10000;
     const frustumPlanes=buildFrustumPlanes(W,H,fov,near,far);
     const centerX=W/2;
     const centerY=H/2;
     currentHoverFace=-1;
+    let cnt=0;
+    let temp;
     for(const f of polygons){
         const rotated=f.po.map(v=>rotate(v.x,v.y,v.z));
         const clipped=clipAgainstFrustum(rotated,frustumPlanes);
@@ -331,51 +449,37 @@ function draw(polygons){
         }
         if(pts.length<3)continue;
         if(isPointInPolygon(centerX,centerY,pts))currentHoverFace=f.id;
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x,pts[0].y);
-        for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x,pts[i].y);
-        ctx.closePath();
-        ctx.fillStyle=f.co;
-        ctx.fill();
+        renderer.drawPolygon(pts,(f.id==choosing)?[255,255,255,1]:(f.co));
+        if(cnt==choosing){renderer.drawPolygon([{x:pts[0].x-10,y:pts[0].y-10},{x:pts[0].x+10,y:pts[0].y-10},{x:pts[0].x+10,y:pts[0].y+10},{x:pts[0].x-10,y:pts[0].y+10}],[0,255-f.id,0,1]);temp=f;}
+        cnt++;
     }
-                // ctx.save();
-                // for (let i = 0; i < 2; i++) {
-                //     const f = foot[i];
-                //     const r = rotate(f.x, f.y, f.z);
-                //     const scr = projectRotated(r);
-                //     if (scr) {
-                //         ctx.beginPath();
-                //         ctx.arc(scr.x, scr.y, 6, 0, Math.PI * 2);
-                //         ctx.fillStyle = i === movingFoot 
-                //         ?'#004' 
-                //         :'#400';
-                //         ctx.fill();
-                //         ctx.strokeStyle = '#fff';
-                //         ctx.lineWidth = 1;
-                //         ctx.stroke();
-                //     }
-                // }
-                // ctx.restore();
-    ctx.beginPath();
-    ctx.arc(centerX,centerY,2,0,Math.PI*2);
-    ctx.fillStyle='#fff';
-    ctx.fill();
+    renderer.drawPolygon([{x:centerX-1,y:centerY-1},{x:centerX+1,y:centerY-1},{x:centerX+1,y:centerY+1},{x:centerX-1,y:centerY+1}],[0,0,0,1]);
     const now=performance.now();
     const fps=(1000/(now-lastTime)).toFixed(1);
     lastTime=now;
-    ctx.fillStyle="#fff";
-    ctx.font="14px monospace";
-    ctx.fillText(`FPS:${fps}`,10,60);
-    ctx.fillText(`Faces:${polygons.length}`,10,80);
-    ctx.fillText(`BaseFaces:${sceneObjects.length}`,10,100);
-    if(currentHoverFace!=-1)ctx.fillText(`HoverFace:${currentHoverFace}    ${sceneObjects[currentHoverFace].normal.x},${sceneObjects[currentHoverFace].normal.y},${sceneObjects[currentHoverFace].normal.z}`,10,120);
-    ctx.fillText(`x:${Math.round(cam.x*10)/10},`,10,140);
-    ctx.fillText(`y:${Math.round(cam.y*10)/10},`,80,140);
-    ctx.fillText(`z:${Math.round(cam.z*10)/10},`,150,140);
-    ctx.fillText(`yf:${Math.round(foot[0].yf*10)/10} `,210,140);
-    ctx.fillText(`nl:${nl} `,10,160);
-    ctx.font="25px monospace";
-    ctx.restore();
+    document.getElementById("info").innerText=`
+FPS:${fps}
+Faces:${cnt}
+BaseFaces:${sceneObjects.length}
+x:${Math.round(cam.x*10)/10},y:${Math.round(cam.y*10)/10},z:${Math.round(cam.z*10)/10},yf:${Math.round(foot[0].yf*10)/10}
+nl:${nl}
+currentHoverFace:${currentHoverFace}
+choosingFace:${choosing}
+`
+    // ctx.fillStyle="#fff";
+    // ctx.font="14px monospace";
+    // ctx.fillText(`FPS:${fps}`,10,60);
+    // ctx.fillText(`Faces:${polygons.length}`,10,80);
+    // ctx.fillText(`BaseFaces:${sceneObjects.length}`,10,100);
+    // if(currentHoverFace!=-1)ctx.fillText(`HoverFace:${currentHoverFace}    ${sceneObjects[currentHoverFace].normal.x},${sceneObjects[currentHoverFace].normal.y},${sceneObjects[currentHoverFace].normal.z}`,10,120);
+    // ctx.fillText(`x:${Math.round(cam.x*10)/10},`,10,140);
+    // ctx.fillText(`y:${Math.round(cam.y*10)/10},`,80,140);
+    // ctx.fillText(`z:${Math.round(cam.z*10)/10},`,150,140);
+    // ctx.fillText(`yf:${Math.round(foot[0].yf*10)/10} `,210,140);
+    // ctx.fillText(`nl:${nl} `,10,160);
+    // ctx.font="25px monospace";
+    // ctx.restore();
+    renderer.present();
 }
 let nl=100;
 let eve={watchEmpty:0,b:0};
@@ -390,7 +494,7 @@ function loop(){
     draw(polygons);
     requestAnimationFrame(loop);
 }
-document.addEventListener('keydown',e=>{if(keys[e.key]!==undefined)keys[e.key]=true});
+document.addEventListener('keydown',e=>{if(keys[e.key]!==undefined)keys[e.key]=true;if(e.key=="ArrowRight")choosing++;if(e.key=="ArrowLeft")choosing--;});
 document.addEventListener('keyup',e=>{if(keys[e.key]!==undefined)keys[e.key]=false});
 canvas.addEventListener('click',()=>canvas.requestPointerLock());
 document.addEventListener('pointerlockchange',()=>lock=document.pointerLockElement===canvas);
@@ -404,43 +508,44 @@ document.addEventListener('mousemove',e=>{
 window.addEventListener('resize',resizeCanvas);
 resizeCanvas();
 function Init(){
-    for(let i=-1400;i<1400;i+=500){
-        for(let j=-1400;j<1400;j+=500){
+    const d=300;
+    for(let i=-1300;i<1400-d;i+=d){
+        for(let j=-1300;j<1400-d;j+=d){
             const X=i,Z=j;
             if(Math.random()>0.5)sceneObjects.unshift({
-                points:[{x:X,y:0,z:Z},{x:X+450,y:0,z:Z},{x:X+450,y:200,z:Z},{x:X,y:200,z:Z}]
-                ,color:`rgb(${224+Math.random()*5}, ${189+Math.random()*5}, ${49+Math.random()*5})`,normal:{x:0,y:0,z:0},id:0
+                points:[{x:X,y:10,z:Z},{x:X+d-50,y:10,z:Z},{x:X+d-50,y:200,z:Z},{x:X,y:200,z:Z}]
+                ,color:[224+Math.random()*5, 189+Math.random()*5, 49+Math.random()*5,1],normal:{x:0,y:0,z:0},id:0
             });else
             sceneObjects.unshift({
-                points:[{x:X,y:0,z:Z},{x:X,y:0,z:Z+450},{x:X,y:200,z:Z+450},{x:X,y:200,z:Z}]
-                ,color:`rgb(${224+Math.random()*5}, ${189+Math.random()*5}, ${49+Math.random()*5})`,normal:{x:0,y:0,z:0},id:0
+                points:[{x:X,y:10,z:Z},{x:X,y:10,z:Z+d-50},{x:X,y:200,z:Z+d-50},{x:X,y:200,z:Z}]
+                ,color:[224+Math.random()*5, 189+Math.random()*5, 49+Math.random()*5,1],normal:{x:0,y:0,z:0},id:0
             });
         }
     }
     const X=Math.random()*2900-1450,Z=Math.random()*2900-1450;
     sceneObjects.unshift({
         points:[{x:X,y:30,z:Z},{x:X+30,y:30,z:Z},{x:X+30,y:30,z:Z+30},{x:X,y:30,z:Z+30}],
-        color:"rgb(100,100,100)",normal:{x:0,y:0,z:0},id:0
+        color:[100,100,100],normal:{x:0,y:0,z:0},id:0
     });
     sceneObjects.unshift({
         points:[{x:X,y:0,z:Z},{x:X,y:0,z:Z+30},{x:X,y:30,z:Z+30},{x:X,y:30,z:Z}],
-        color:"rgb(105,105,105)",normal:{x:0,y:0,z:0},id:0
+        color:[105,105,105],normal:{x:0,y:0,z:0},id:0
     });
     sceneObjects.unshift({
         points:[{x:X+30,y:0,z:Z},{x:X+30,y:0,z:Z+30},{x:X+30,y:30,z:Z+30},{x:X+30,y:30,z:Z}],
-        color:"rgb(105,105,105)",normal:{x:0,y:0,z:0},id:0
+        color:[105,105,105],normal:{x:0,y:0,z:0},id:0
     });
     sceneObjects.unshift({
         points:[{x:X,y:0,z:Z},{x:X+30,y:0,z:Z},{x:X+30,y:30,z:Z},{x:X,y:30,z:Z}],
-        color:"rgb(110,110,110)",normal:{x:0,y:0,z:0},id:0
+        color:[110,110,110],normal:{x:0,y:0,z:0},id:0
     });
     sceneObjects.unshift({
         points:[{x:X,y:0,z:Z+30},{x:X+30,y:0,z:Z+30},{x:X+30,y:30,z:Z+30},{x:X,y:30,z:Z+30}],
-        color:"rgb(110,110,110)",normal:{x:0,y:0,z:0},id:0
+        color:[110,110,110],normal:{x:0,y:0,z:0},id:0
     });
     sceneObjects.unshift({
         points:[{x:X+5,y:32,z:Z+5},{x:X+25,y:32,z:Z+5},{x:X+25,y:32,z:Z+25},{x:X+5,y:32,z:Z+25}],
-        color:"rgb(200,0,0)",normal:{x:0,y:0,z:0},id:0
+        color:[200,0,0],normal:{x:0,y:0,z:0},id:0
     });
     loop();
 }
