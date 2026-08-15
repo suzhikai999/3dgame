@@ -213,14 +213,15 @@ function splitPolygon(oldPoly,cutter){
     const n=cutter.n;
     const p0=cutter.po[0];
     const pts=oldPoly.po;
-    const upper=[],lower=[];
+    let upper=[],lower=[];
+    let cnt=0;
     for(let i=0;i<pts.length;i++){
         const curr=pts[i];
         const next=pts[(i+1)%pts.length];
         const dc=(curr.x-p0.x)*n.x+(curr.y-p0.y)*n.y+(curr.z-p0.z)*n.z;
         const dn=(next.x-p0.x)*n.x+(next.y-p0.y)*n.y+(next.z-p0.z)*n.z;
         if(dc>0.0001)upper.push(curr);else
-        if(dc<-0.0001)lower.push(curr);else{upper.push(curr);lower.push(curr);}
+        if(dc<-0.0001)lower.push(curr);else{upper.push(curr);lower.push(curr);cnt++;}
         if((dc>0.0001&&dn<-0.0001)||(dc<-0.0001&&dn>0.0001)){
             const t=(Math.abs(dc)+Math.abs(dn));
             upper.push(lerpPoint(curr,next,Math.abs(dc+0.5)/t));
@@ -228,6 +229,7 @@ function splitPolygon(oldPoly,cutter){
             console.log(oldPoly.id);
         }
     }
+    if(cnt>=3)lower=[];
     return[{po:upper,co:oldPoly.co,id:oldPoly.id},{po:lower,co:oldPoly.co,id:oldPoly.id}];
 }
 function addOneByOne(newPoly,existing){
@@ -328,7 +330,7 @@ function update(){
     if(keys.s){Move.x-=fx;Move.z-=fz;}
     if(keys.a){Move.x-=rx;Move.z-=rz;}
     if(keys.d){Move.x+=rx;Move.z+=rz;}
-    if(keys.r&&nl>0)cam.speed=6,nl-=0.7;else cam.speed=30,nl+=(nl<20)?-0.3:0.3,nl=Math.min(nl,100);
+    if(keys.r&&nl>0)cam.speed=6,nl-=0.7;else cam.speed=3,nl+=(nl<20)?-0.3:0.3,nl=Math.min(nl,100);
     if(nl<-100)nl=100;
     if(currentHoverFace==0){
         sceneObjects[0].color=[150,0,0,1];
@@ -427,7 +429,7 @@ function update(){
     cam.y=(foot[0].y+foot[1].y)/2+50;
     cam.z=(foot[0].z+foot[1].z)/2;
 }
-let lastTime=0,choosing=76;
+let lastTime=0;
 function draw(polygons){
     renderer.bindOffscreen();
     const near=1,far=10000;
@@ -436,7 +438,6 @@ function draw(polygons){
     const centerY=H/2;
     currentHoverFace=-1;
     let cnt=0;
-    let temp;
     for(const f of polygons){
         const rotated=f.po.map(v=>rotate(v.x,v.y,v.z));
         const clipped=clipAgainstFrustum(rotated,frustumPlanes);
@@ -449,8 +450,7 @@ function draw(polygons){
         }
         if(pts.length<3)continue;
         if(isPointInPolygon(centerX,centerY,pts))currentHoverFace=f.id;
-        renderer.drawPolygon(pts,(f.id==choosing)?[255,255,255,1]:(f.co));
-        if(cnt==choosing){renderer.drawPolygon([{x:pts[0].x-10,y:pts[0].y-10},{x:pts[0].x+10,y:pts[0].y-10},{x:pts[0].x+10,y:pts[0].y+10},{x:pts[0].x-10,y:pts[0].y+10}],[0,255-f.id,0,1]);temp=f;}
+        renderer.drawPolygon(pts,(f.co));
         cnt++;
     }
     renderer.drawPolygon([{x:centerX-1,y:centerY-1},{x:centerX+1,y:centerY-1},{x:centerX+1,y:centerY+1},{x:centerX-1,y:centerY+1}],[0,0,0,1]);
@@ -464,7 +464,6 @@ BaseFaces:${sceneObjects.length}
 x:${Math.round(cam.x*10)/10},y:${Math.round(cam.y*10)/10},z:${Math.round(cam.z*10)/10},yf:${Math.round(foot[0].yf*10)/10}
 nl:${nl}
 currentHoverFace:${currentHoverFace}
-choosingFace:${choosing}
 `
     // ctx.fillStyle="#fff";
     // ctx.font="14px monospace";
@@ -494,7 +493,7 @@ function loop(){
     draw(polygons);
     requestAnimationFrame(loop);
 }
-document.addEventListener('keydown',e=>{if(keys[e.key]!==undefined)keys[e.key]=true;if(e.key=="ArrowRight")choosing++;if(e.key=="ArrowLeft")choosing--;});
+document.addEventListener('keydown',e=>{if(keys[e.key]!==undefined)keys[e.key]=true;});
 document.addEventListener('keyup',e=>{if(keys[e.key]!==undefined)keys[e.key]=false});
 canvas.addEventListener('click',()=>canvas.requestPointerLock());
 document.addEventListener('pointerlockchange',()=>lock=document.pointerLockElement===canvas);
@@ -508,16 +507,16 @@ document.addEventListener('mousemove',e=>{
 window.addEventListener('resize',resizeCanvas);
 resizeCanvas();
 function Init(){
-    const d=300;
-    for(let i=-1300;i<1400-d;i+=d){
-        for(let j=-1300;j<1400-d;j+=d){
+    const d=150;
+    for(let i=-1400;i<1400-d;i+=d){
+        for(let j=-1400;j<1400-d;j+=d){
             const X=i,Z=j;
-            if(Math.random()>0.5)sceneObjects.unshift({
-                points:[{x:X,y:10,z:Z},{x:X+d-50,y:10,z:Z},{x:X+d-50,y:200,z:Z},{x:X,y:200,z:Z}]
+            if(Math.random()>=0.5)sceneObjects.unshift({
+                points:[{x:X,y:1,z:Z},{x:X+d-1,y:1,z:Z},{x:X+d-1,y:200,z:Z},{x:X,y:200,z:Z}]
                 ,color:[224+Math.random()*5, 189+Math.random()*5, 49+Math.random()*5,1],normal:{x:0,y:0,z:0},id:0
             });else
             sceneObjects.unshift({
-                points:[{x:X,y:10,z:Z},{x:X,y:10,z:Z+d-50},{x:X,y:200,z:Z+d-50},{x:X,y:200,z:Z}]
+                points:[{x:X,y:1,z:Z},{x:X,y:1,z:Z+d-1},{x:X,y:200,z:Z+d-1},{x:X,y:200,z:Z}]
                 ,color:[224+Math.random()*5, 189+Math.random()*5, 49+Math.random()*5,1],normal:{x:0,y:0,z:0},id:0
             });
         }
